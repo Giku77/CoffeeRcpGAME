@@ -762,26 +762,27 @@
             }
         }
 
-        .amountGrid{
-        display:flex;
-        flex-wrap:wrap;
-        gap:8px;
-        }
-        .amountChip{
-        border: 3px solid #111827;
-        background:#fff;
-        border-radius:0;
-        padding:10px 10px;
-        cursor:pointer;
-        font-size:13px;
-        box-shadow:3px 3px 0 #111827;
-        font-weight:800;
-        }
-        .amountChip:active{
-        transform: translate(2px,2px);
-        box-shadow:1px 1px 0 #111827;
+        .amountGrid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
         }
 
+        .amountChip {
+            border: 3px solid #111827;
+            background: #fff;
+            border-radius: 0;
+            padding: 10px 10px;
+            cursor: pointer;
+            font-size: 13px;
+            box-shadow: 3px 3px 0 #111827;
+            font-weight: 800;
+        }
+
+        .amountChip:active {
+            transform: translate(2px, 2px);
+            box-shadow: 1px 1px 0 #111827;
+        }
     </style>
 </head>
 
@@ -939,13 +940,13 @@
                     <div class="muted" style="margin-bottom:8px;">
                         엑셀(.xlsx)을 선택하면 자동으로 recipes를 갱신합니다.
                     </div>
-                
+
                     <input id="excelFile" type="file" accept=".xlsx,.xls" />
                     <div class="row" style="margin-top:10px;">
                         <button class="btn btnPrimary" id="btnLoadExcel">엑셀 불러오기</button>
                         <button class="btn btnSecondary" id="btnUseDefault">기본 데이터로 복구</button>
                     </div>
-                
+
                     <div class="hint" style="margin-top:12px;">
                         컬럼 권장: <b>id, name, question, hotSteps, icedSteps</b><br />
                         hotSteps/icedSteps 셀에는 단계들을 <b>줄바꿈</b> 또는 <b>|</b> 로 구분해서 넣어줘.
@@ -962,6 +963,7 @@
                 <div class="row" style="margin-top:0;">
                     <button class="btn btnPrimary" id="btnStartGame">게임 시작</button>
                     <button class="btn btnSecondary" id="btnStartNoBgm">BGM 없이 시작</button>
+                    <button class="btn btnSecondary" id="btnStartQuiz">객관식 퀴즈 시작</button>
                 </div>
 
                 <div class="hint" style="margin-top:12px;">
@@ -973,19 +975,19 @@
         <div id="amountOverlay" class="overlay" style="display:none;">
             <div class="overlayCard">
                 <div style="font-size:15px; font-weight:900; margin-bottom:10px;" id="amountTitle">수치 선택</div>
-                <div class="muted" style="margin-bottom:10px;" id="amountDesc">값을 선택하거나 직접 입력하세요.</div>
-        
+                <div class="muted" style="margin-bottom:10px" id="amountDesc">값을 선택하거나 직접 입력하세요.</div>
+
                 <div class="amountGrid" id="amountGrid"></div>
-        
+
                 <div class="edit" style="grid-template-columns: 1fr 120px; margin-top:12px;">
                     <input id="amountInput" type="number" step="1" placeholder="직접 입력" />
                     <button class="btn btnPrimary" id="amountOk">확인</button>
                 </div>
-        
+
                 <div class="row" style="margin-top:10px;">
                     <button class="btn btnSecondary" id="amountCancel">취소</button>
                 </div>
-        
+
                 <div class="hint" style="margin-top:12px;">
                     팁: 물/우유처럼 자주 쓰는 값은 위 버튼으로 빠르게 선택 가능!
                 </div>
@@ -995,7 +997,7 @@
 
     <script>
         let recipes = [
-           
+            // ✅ 여기에 기본 레시피를 넣어도 되고, 엑셀로 불러와도 됨
         ];
 
         const $app = document.querySelector(".app");
@@ -1078,8 +1080,11 @@
                 recipes = loaded; // ✅ recipes 교체
                 showToast(`엑셀 로드 완료! (${recipes.length}개)`, "good");
 
-                // 게임 중이면 즉시 반영: 새 손님으로 갱신
-                if (gameStarted) nextCustomer();
+                // 게임 중이면 즉시 반영
+                if (gameStarted) {
+                    if (gameMode === "quiz") nextQuizQuestion();
+                    else nextCustomer();
+                }
             } catch (e) {
                 console.error(e);
                 showToast("엑셀 로드 실패! 콘솔 로그 확인해줘.", "bad");
@@ -1089,7 +1094,10 @@
         $btnUseDefault?.addEventListener("click", () => {
             recipes = JSON.parse(JSON.stringify(DEFAULT_RECIPES));
             showToast("기본 데이터로 복구했어!", "mid");
-            if (gameStarted) nextCustomer();
+            if (gameStarted) {
+                if (gameMode === "quiz") nextQuizQuestion();
+                else nextCustomer();
+            }
         });
 
 
@@ -1101,6 +1109,7 @@
         const $startOverlay = document.getElementById("startOverlay");
         const $btnStartGame = document.getElementById("btnStartGame");
         const $btnStartNoBgm = document.getElementById("btnStartNoBgm");
+        const $btnStartQuiz = document.getElementById("btnStartQuiz");
 
         const $scoreValue = document.getElementById("scoreValue");
         const $avatar = document.getElementById("avatar");
@@ -1129,6 +1138,10 @@
         let timerId = null;
         let remainingSec = 60;
         let gameStarted = false;
+
+        // ✅ 게임 모드
+        let gameMode = "build"; // "build" | "quiz"
+        let currentQuiz = null;
 
         // BGM
         let bgmAudio = null;
@@ -1469,7 +1482,6 @@
             return { atoms, tokens };
         }
 
-
         function parseAmount(stepText) {
             const t = stepText.toString();
             const m = t.match(/(\d+(?:\.\d+)?)\s*(ml|g|p|s|shot|oz|캔|봉)/i);
@@ -1502,7 +1514,8 @@
                 if (remainingSec <= 10) $timerBox.classList.add("danger");
                 if (remainingSec <= 0) {
                     stopTimer();
-                    serve(true);
+                    if (gameMode === "quiz") quizTimeout();
+                    else serve(true);
                 }
             }, 1000);
         }
@@ -1561,9 +1574,9 @@
                     recipe,
                     variant,
                     correctSteps,
-                    correctAtoms: analysis.atoms,   
+                    correctAtoms: analysis.atoms,
                     correctTokens: analysis.tokens
-                });  
+                });
             }
             return { items, idx: 0, servedFlags: Array(items.length).fill(false) };
         }
@@ -1592,7 +1605,7 @@
                 uniqPool.push(t);
             }
 
-            const decoysCount = Math.min(4, uniqPool.length);          // ✅ 가짜는 4개 정도만
+            const decoysCount = Math.min(4, uniqPool.length); // ✅ 가짜는 4개 정도만
             const decoys = shuffle(uniqPool).slice(0, decoysCount);
 
             // 너무 많아지는 거 방지: 전체 토큰 14개 캡
@@ -1638,15 +1651,12 @@
             });
         }
 
-
         function renderOrder() {
             if (!currentOrder) return;
             const item = getCurrentItem();
             if (!item) return;
 
             $avatar.textContent = avatars[randInt(avatars.length)];
-
-            /* ✅ 여기! "주문이요! ~잔 부탁해요" 제거하고 고정 멘트 */
             $dialogue.textContent = "주문서를 확인해 주세요.";
 
             const lines = currentOrder.items.map((it, i) => {
@@ -1772,6 +1782,175 @@
             setTimeout(() => $app.classList.remove("shake"), 200);
         }
 
+        // ✅ 모드별 UI 토글
+        function applyModeUI() {
+            const isQuiz = (gameMode === "quiz");
+
+            if ($mySteps) $mySteps.style.display = isQuiz ? "none" : "flex";
+            if ($btnClear) $btnClear.style.display = isQuiz ? "none" : "inline-block";
+            if ($btnUndo) $btnUndo.style.display = isQuiz ? "none" : "inline-block";
+
+            const bar = document.getElementById("barSim");
+            if (bar) bar.style.display = isQuiz ? "none" : "block";
+
+            if ($btnServe) $btnServe.style.display = isQuiz ? "none" : "inline-block";
+        }
+
+        // =========================
+        // ✅ 객관식 퀴즈 모드
+        // =========================
+        function recipeAtomsString(recipe, variant) {
+            const steps = (variant === "HOT" ? recipe.hotSteps : recipe.icedSteps) || [];
+            const analysis = analyzeSteps(steps);
+            const raw = (analysis.atoms || []).join(" / ");
+            const trimmed = raw.length > 120 ? raw.slice(0, 120) + " ..." : raw;
+            return trimmed || "(단계 없음)";
+        }
+
+        function pickQuizQuestion() {
+            if (!recipes || recipes.length === 0) return null;
+
+            const recipe = recipes[randInt(recipes.length)];
+            const hasHot = Array.isArray(recipe.hotSteps) && recipe.hotSteps.length > 0;
+            const hasIced = Array.isArray(recipe.icedSteps) && recipe.icedSteps.length > 0;
+
+            let variant = null;
+            if (hasHot && hasIced) variant = Math.random() < 0.5 ? "HOT" : "ICED";
+            else if (hasHot) variant = "HOT";
+            else variant = "ICED";
+
+            const correctText = recipeAtomsString(recipe, variant);
+
+            const pool = recipes.filter(r => r !== recipe);
+            const decoys = [];
+            const seen = new Set([correctText]);
+
+            for (let tries = 0; tries < 200 && decoys.length < 4; tries++) {
+                const r = pool[randInt(pool.length)];
+                const t = recipeAtomsString(r, variant);
+                if (!t || seen.has(t)) continue;
+                seen.add(t);
+                decoys.push(t);
+            }
+
+            if (decoys.length < 4) {
+                const altVariant = (variant === "HOT") ? "ICED" : "HOT";
+                for (let tries = 0; tries < 200 && decoys.length < 4; tries++) {
+                    const r = pool[randInt(pool.length)];
+                    const t = recipeAtomsString(r, altVariant);
+                    if (!t || seen.has(t)) continue;
+                    seen.add(t);
+                    decoys.push(t);
+                }
+            }
+
+            const options = shuffle([correctText, ...decoys.slice(0, 4)]);
+            const correctIndex = options.indexOf(correctText);
+
+            const qText = (recipe.question && recipe.question.trim())
+                ? recipe.question.trim()
+                : `${recipe.name} (${variant}) 레시피로 올바른 것은?`;
+
+            return {
+                recipe,
+                variant,
+                question: qText,
+                options,
+                correctIndex
+            };
+        }
+
+        function renderQuiz(q) {
+            if (!q) return;
+
+            $avatar.textContent = avatars[randInt(avatars.length)];
+            $dialogue.textContent = "문제를 풀어주세요.";
+            $ticket.innerHTML = `
+        <div style="font-weight:900; margin-bottom:10px;">객관식 퀴즈</div>
+        <div style="line-height:1.6; font-weight:800;">
+          ${escapeHtml(q.question)}
+          <span class="badge ${q.variant === "HOT" ? "hot" : "iced"}">${q.variant}</span>
+        </div>
+        <div class="muted" style="margin-top:10px;">보기 5개 중 1개 선택</div>
+      `;
+
+            $barTitle.textContent = `QUIZ · ${q.recipe.name} · ${q.variant}`;
+            $barHint.textContent = "정답 보기 하나를 선택해!";
+            setCupVariant(q.variant);
+
+            $palette.innerHTML = "";
+            q.options.forEach((optText, idx) => {
+                const btn = document.createElement("button");
+                btn.className = "chip";
+                btn.type = "button";
+                btn.innerHTML = `<small>${idx + 1}</small> ${escapeHtml(optText)}`;
+                btn.addEventListener("click", () => {
+                    playClick();
+                    answerQuiz(idx);
+                });
+                $palette.appendChild(btn);
+            });
+
+            setLog("보기 중 하나를 고르면 바로 채점돼요.");
+        }
+
+        function nextQuizQuestion() {
+            if (!gameStarted) return;
+            currentQuiz = pickQuizQuestion();
+            if (!currentQuiz) {
+                $ticket.textContent = "recipes 데이터가 비어있어요.";
+                $palette.innerHTML = "";
+                return;
+            }
+            renderQuiz(currentQuiz);
+            startTimer();
+        }
+
+        function answerQuiz(chosenIndex) {
+            stopTimer();
+            if (!currentQuiz) return;
+
+            const ok = chosenIndex === currentQuiz.correctIndex;
+
+            if (ok) {
+                setScore(1);
+                showToast("정답! 😋 (+1점)", "good");
+                $dialogue.textContent = "오… 완벽한 선택이에요!";
+                flashCup("good");
+                setLog(
+                    `정답 ✅ (+1점)\n\n` +
+                    `문제: ${currentQuiz.question}\n` +
+                    `정답: ${currentQuiz.correctIndex + 1}번\n`
+                );
+            } else {
+                showToast("오답! 😡 (+0점)", "bad");
+                $dialogue.textContent = "음… 그건 아닌데요…";
+                shakeApp();
+                flashCup("bad");
+                setLog(
+                    `오답 ❌ (+0점)\n\n` +
+                    `문제: ${currentQuiz.question}\n` +
+                    `내 선택: ${chosenIndex + 1}번\n` +
+                    `정답: ${currentQuiz.correctIndex + 1}번\n`
+                );
+            }
+
+            setTimeout(() => nextQuizQuestion(), 650);
+        }
+
+        function quizTimeout() {
+            showToast("시간 초과! 😡 (+0점)", "bad");
+            $dialogue.textContent = "시간이 너무 오래 걸렸어요! 😤";
+            shakeApp();
+            flashCup("bad");
+            setLog(
+                `시간 초과 ❌ (+0점)\n\n` +
+                `문제: ${currentQuiz?.question ?? "(없음)"}\n` +
+                `정답: ${(currentQuiz ? (currentQuiz.correctIndex + 1) + "번" : "(없음)")}\n`
+            );
+            setTimeout(() => nextQuizQuestion(), 650);
+        }
+
         function serve(timeout = false) {
             stopTimer();
             if (!currentOrder) {
@@ -1863,13 +2042,21 @@
             } else {
                 renderOrder();
                 const nextItem = getCurrentItem();
-                buildPalette(nextItem.correctSteps, nextItem.variant);
+                // ✅ 버그 수정: correctSteps가 아니라 correctTokens를 넘겨야 함
+                buildPalette(nextItem.correctTokens, nextItem.variant);
                 startTimer();
             }
         }
 
         function nextCustomer() {
             if (!gameStarted) return;
+
+            // ✅ 퀴즈 모드면 퀴즈로 진행
+            if (gameMode === "quiz") {
+                nextQuizQuestion();
+                return;
+            }
+
             currentOrder = pickOrder();
             myRecipeSteps = [];
             renderMySteps();
@@ -1899,7 +2086,6 @@
             return Math.max(0, Math.min(1, x));
         }
 
-        // Events
         // =========================
         // ml/g 선택 모달
         // =========================
@@ -1975,7 +2161,6 @@
             closeAmountModal();
         });
 
-
         $btnClear.addEventListener("click", () => { myRecipeSteps = []; renderMySteps(); renderCounter(); setLog(""); });
         $btnUndo.addEventListener("click", () => { myRecipeSteps.pop(); renderMySteps(); renderCounter(); });
 
@@ -1989,17 +2174,26 @@
             serve(false);
         });
 
-        function startGame(withBgm) {
+        function startGame(mode, withBgm) {
             gameStarted = true;
+            gameMode = mode; // "build" or "quiz"
+            applyModeUI();
+
             $startOverlay.style.display = "none";
-            setLog("손님이 주문하면, 가운데 카드들을 클릭해서 내 레시피를 만들고 서빙하세요!");
-            nextCustomer();
+            setLog(mode === "quiz"
+                ? "객관식 퀴즈 모드! 보기 5개 중 정답을 고르세요!"
+                : "손님이 주문하면, 가운데 카드들을 클릭해서 내 레시피를 만들고 서빙하세요!"
+            );
+
+            if (mode === "quiz") nextQuizQuestion();
+            else nextCustomer();
 
             if (withBgm) toggleBgm();
         }
 
-        $btnStartGame.addEventListener("click", () => startGame(true));
-        $btnStartNoBgm.addEventListener("click", () => startGame(false));
+        $btnStartGame.addEventListener("click", () => startGame("build", true));
+        $btnStartNoBgm.addEventListener("click", () => startGame("build", false));
+        $btnStartQuiz.addEventListener("click", () => startGame("quiz", true));
 
         function initBgm() {
             if (bgmAudio) return;
@@ -2033,6 +2227,9 @@
         stopTimer();
         setLog("Start를 눌러 게임을 시작하세요!");
     </script>
+
+    <!-- ✅ XLSX는 항상 스크립트보다 '위'에 있어도 되지만,
+       이 파일은 버튼 클릭 때만 쓰니까 아래에 둬도 OK -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </body>
 
