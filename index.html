@@ -964,6 +964,7 @@
                     <button class="btn btnPrimary" id="btnStartGame">게임 시작</button>
                     <button class="btn btnSecondary" id="btnStartNoBgm">BGM 없이 시작</button>
                     <button class="btn btnSecondary" id="btnStartQuiz">객관식 퀴즈 시작</button>
+                    <button class="btn btnSecondary" id="btnStartMeasure">계량 퀴즈 시작</button>
                 </div>
 
                 <div class="hint" style="margin-top:12px;">
@@ -1083,6 +1084,7 @@
                 // 게임 중이면 즉시 반영
                 if (gameStarted) {
                     if (gameMode === "quiz") nextQuizQuestion();
+                    else if (gameMode === "measure") nextMeasureQuestion();
                     else nextCustomer();
                 }
             } catch (e) {
@@ -1096,6 +1098,7 @@
             showToast("기본 데이터로 복구했어!", "mid");
             if (gameStarted) {
                 if (gameMode === "quiz") nextQuizQuestion();
+                else if (gameMode === "measure") nextMeasureQuestion();
                 else nextCustomer();
             }
         });
@@ -1110,6 +1113,7 @@
         const $btnStartGame = document.getElementById("btnStartGame");
         const $btnStartNoBgm = document.getElementById("btnStartNoBgm");
         const $btnStartQuiz = document.getElementById("btnStartQuiz");
+        const $btnStartMeasure = document.getElementById("btnStartMeasure");
 
         const $scoreValue = document.getElementById("scoreValue");
         const $avatar = document.getElementById("avatar");
@@ -1784,21 +1788,141 @@
 
         // ✅ 모드별 UI 토글
         function applyModeUI() {
-            const isQuiz = (gameMode === "quiz");
+            const isQuizLike = (gameMode === "quiz" || gameMode === "measure");
 
-            if ($mySteps) $mySteps.style.display = isQuiz ? "none" : "flex";
-            if ($btnClear) $btnClear.style.display = isQuiz ? "none" : "inline-block";
-            if ($btnUndo) $btnUndo.style.display = isQuiz ? "none" : "inline-block";
+            if ($mySteps) $mySteps.style.display = isQuizLike ? "none" : "flex";
+            if ($btnClear) $btnClear.style.display = isQuizLike ? "none" : "inline-block";
+            if ($btnUndo) $btnUndo.style.display = isQuizLike ? "none" : "inline-block";
 
             const bar = document.getElementById("barSim");
-            if (bar) bar.style.display = isQuiz ? "none" : "block";
+            if (bar) bar.style.display = isQuizLike ? "none" : "block";
 
-            if ($btnServe) $btnServe.style.display = isQuiz ? "none" : "inline-block";
+            if ($btnServe) $btnServe.style.display = isQuizLike ? "none" : "inline-block";
         }
 
         // =========================
         // ✅ 객관식 퀴즈 모드
         // =========================
+        // =========================
+            // ✅ 계량(ml/g/oz) 객관식 퀴즈 모드
+            // - 정답 문장 그대로
+            // - 오답은 ml/g/oz 숫자만 랜덤 변조
+            // - 원래 값이 10의 자리면(끝이 0) 오답도 끝이 0만 나오게
+            // =========================
+            function measureTextFromSteps(recipe, variant) {
+                const steps = (variant === "HOT" ? recipe.hotSteps : recipe.icedSteps) || [];
+                // 보기/정답은 "원문 기반"이 가장 직관적이라 원문 join
+                return (steps || []).join(" / ").trim();
+            }
+
+            function amountStepSize(value) {
+                // value가 150, 120, 270 같이 "10의 자리"면 10단위로만 변조 (일의자리 안 나오게)
+                if (Number.isFinite(value) && Number.isInteger(value) && value % 10 === 0) return 10;
+                // 그 외는 정수면 1단위, 소수면 0.5단위 정도
+                if (Number.isFinite(value) && Number.isInteger(value)) return 1;
+                return 0.5;
+            }
+
+            function formatAmountValue(v) {
+                // 150 -> "150", 12.5 -> "12.5"
+                if (Math.abs(v - Math.round(v)) < 1e-9) return String(Math.round(v));
+                return String(v);
+            }
+
+            function mutateAmountsKeepingTens(text) {
+                // ml/g/oz만 대상으로 함 (p/s/shot 등 카운트 단위는 그대로 둠)
+                // "약270g" 같은 것도 270g 부분만 바뀜
+                let changed = false;
+
+                const out = text.replace(/(\d+(?:\.\d+)?)\s*(ml|g|oz)\b/ig, (m, num, unit) => {
+                    const value = Number(num);
+                    if (!Number.isFinite(value)) return m;
+
+                    const step = amountStepSize(value);
+                    const deltas = [-3, -2, -1, 1, 2, 3];
+
+                    let next = value;
+                    for (let tries = 0; tries < 30; tries++) {
+                        const d = deltas[randInt(deltas.length)] * step;
+                        next = value + d;
+                        if (next <= 0) continue;
+
+                        // step이 10이면 무조건 10의 자리로 떨어지게
+                        if (step >= 1) next = Math.round(next / step) * step;
+
+                        if (next !== value) {
+                            changed = true;
+                            break;
+                        }
+                    }
+
+                    return `${formatAmountValue(next)}${unit.toLowerCase()}`;
+                });
+
+                // 혹시 변조 대상이 하나도 없어서 changed=false면 그대로 반환 -> 상위에서 다시 시도하게
+                return { text: out, changed };
+            }
+
+            function nextMeasureQuestion() {
+                    if (!gameStarted) return;
+                    currentQuiz = pickMeasureQuestion();
+                    if (!currentQuiz) {
+                        $ticket.textContent = "recipes 데이터가 비어있어요.";
+                        $palette.innerHTML = "";
+                        return;
+                    }
+                    renderQuiz(currentQuiz); // 기존 렌더 재사용
+                    startTimer();
+                }
+
+            function pickMeasureQuestion() {
+                if (!recipes || recipes.length === 0) return null;
+
+                const recipe = recipes[randInt(recipes.length)];
+                const hasHot = Array.isArray(recipe.hotSteps) && recipe.hotSteps.length > 0;
+                const hasIced = Array.isArray(recipe.icedSteps) && recipe.icedSteps.length > 0;
+
+                let variant = null;
+                if (hasHot && hasIced) variant = Math.random() < 0.5 ? "HOT" : "ICED";
+                else if (hasHot) variant = "HOT";
+                else variant = "ICED";
+
+                const correctText = measureTextFromSteps(recipe, variant) || "(단계 없음)";
+
+                // 오답 4개 만들기 (숫자만 변조)
+                const decoys = [];
+                const seen = new Set([correctText]);
+
+                for (let tries = 0; tries < 400 && decoys.length < 4; tries++) {
+                    const m = mutateAmountsKeepingTens(correctText);
+                    if (!m.changed) continue; // ml/g/oz가 없으면(혹은 못 바꾸면) 스킵
+                    if (!m.text || seen.has(m.text)) continue;
+                    seen.add(m.text);
+                    decoys.push(m.text);
+                }
+
+                // 오답이 부족하면(계량이 없는 레시피 등) fallback: 기존 레시피 텍스트 기반으로 채움
+                if (decoys.length < 4) {
+                    const pool = recipes.filter(r => r !== recipe);
+                    for (let tries = 0; tries < 400 && decoys.length < 4 && pool.length > 0; tries++) {
+                        const r = pool[randInt(pool.length)];
+                        const t = measureTextFromSteps(r, variant);
+                        if (!t || seen.has(t)) continue;
+                        seen.add(t);
+                        decoys.push(t);
+                    }
+                }
+
+                const options = shuffle([correctText, ...decoys.slice(0, 4)]);
+                const correctIndex = options.indexOf(correctText);
+
+                const qText = (recipe.question && recipe.question.trim())
+                    ? recipe.question.trim()
+                    : `${recipe.name} (${variant}) 레시피의 올바른 “계량”은?`;
+
+                return { recipe, variant, question: qText, options, correctIndex, kind: "measure" };
+            }
+
         function recipeAtomsString(recipe, variant) {
             const steps = (variant === "HOT" ? recipe.hotSteps : recipe.icedSteps) || [];
             const analysis = analyzeSteps(steps);
@@ -1935,7 +2059,10 @@
                 );
             }
 
-            setTimeout(() => nextQuizQuestion(), 650);
+            setTimeout(() => {
+                if (gameMode === "measure") nextMeasureQuestion();
+                else nextQuizQuestion();
+            }, 650);
         }
 
         function quizTimeout() {
@@ -2054,6 +2181,10 @@
             // ✅ 퀴즈 모드면 퀴즈로 진행
             if (gameMode === "quiz") {
                 nextQuizQuestion();
+                return;
+            }
+            if (gameMode === "measure") {
+                nextMeasureQuestion();
                 return;
             }
 
@@ -2186,7 +2317,9 @@
             );
 
             if (mode === "quiz") nextQuizQuestion();
+            else if (mode === "measure") nextMeasureQuestion();
             else nextCustomer();
+
 
             if (withBgm) toggleBgm();
         }
@@ -2194,6 +2327,7 @@
         $btnStartGame.addEventListener("click", () => startGame("build", true));
         $btnStartNoBgm.addEventListener("click", () => startGame("build", false));
         $btnStartQuiz.addEventListener("click", () => startGame("quiz", true));
+        $btnStartMeasure.addEventListener("click", () => startGame("measure", true));
 
         function initBgm() {
             if (bgmAudio) return;
